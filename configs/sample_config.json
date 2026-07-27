@@ -1,0 +1,40 @@
+{
+  "contacts": [
+    {
+      "id": "demo-1",
+      "displayName": "示例联系人",
+      "searchName": "示例",
+      "avatarPath": "",
+      "enabled": true
+    }
+  ],
+  "calibration": {
+    "deviceModel": "sample-device",
+    "screenWidth": 1080,
+    "screenHeight": 1920,
+    "densityDpi": 420,
+    "wechatVersionHint": "",
+    "updatedAt": 0,
+    "points": {
+      "searchEntry": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "searchInput": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "inputAction": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "searchResult1": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "chatMore": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "videoCall": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "videoCallConfirm": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "homeTabWechat": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "back": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0}
+    },
+    "delays": {
+      "afterOpenWechatMs": 1800,
+      "afterSearchEntryMs": 900,
+      "afterInputMs": 1200,
+      "afterResultMs": 1400,
+      "afterChatMoreMs": 900,
+      "afterVideoCallMs": 900,
+      "afterVideoConfirmMs": 800
+    }
+  },
+  "dryRun": true
+}
