@@ -52,7 +52,9 @@ class CallKeepAliveService : Service() {
                 startAsForeground(intent?.getStringExtra(EXTRA_TEXT) ?: "自动点击保活中…")
             }
         }
-        return START_STICKY
+        // This service only exists for one user-triggered flow. A sticky restart
+        // can replay a stale call after the flow has already finished.
+        return START_NOT_STICKY
     }
 
     private fun triggerCall(contactId: String, forceDry: Boolean?, attempt: Int) {

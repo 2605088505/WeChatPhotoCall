@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import com.family.photocall.model.AppConfig
+import com.family.photocall.model.AutomationActions
+import com.family.photocall.model.AutomationStepConfig
 import com.family.photocall.model.CalibrationConfig
 import com.family.photocall.model.ContactConfig
 import com.family.photocall.model.DelayConfig
@@ -25,19 +27,9 @@ class ConfigRepository(private val context: Context) {
             val fromPrefs = readPrefs()
             val fromFile = readFile()
 
-            when {
-                fromPrefs != null && fromFile != null -> {
-                    // 谁更新时间更新用谁，避免旧坏文件盖住你刚校准的结果
-                    if (fromPrefs.calibration.updatedAt >= fromFile.calibration.updatedAt) {
-                        fromPrefs
-                    } else {
-                        fromFile
-                    }
-                }
-                fromPrefs != null -> fromPrefs
-                fromFile != null -> fromFile
-                else -> defaultConfig()
-            }
+            // 无障碍服务运行在 :a11y 独立进程，SharedPreferences 在不同进程间
+            // 可能保留旧缓存；文件每次都重新读取，确保演练模式和联系人更新即时可见。
+            fromFile ?: fromPrefs ?: defaultConfig()
         } catch (t: Exception) {
             Log.e(TAG, "load failed", t)
             defaultConfig()
@@ -92,6 +84,23 @@ class ConfigRepository(private val context: Context) {
         save(current.copy(dryRun = dryRun))
     }
 
+    fun getAutomationSteps(config: AppConfig = load()): List<AutomationStepConfig> {
+        return config.automationSteps ?: defaultAutomationSteps(config.calibration)
+    }
+
+    fun ensureAutomationSteps(): List<AutomationStepConfig> {
+        val current = load()
+        val steps = current.automationSteps ?: defaultAutomationSteps(current.calibration)
+        if (current.automationSteps == null) {
+            save(current.copy(automationSteps = steps))
+        }
+        return steps
+    }
+
+    fun updateAutomationSteps(steps: List<AutomationStepConfig>) {
+        save(load().copy(automationSteps = steps))
+    }
+
     fun exportJson(): String = gson.toJson(load())
 
     fun importJson(json: String) {
@@ -118,22 +127,78 @@ class ConfigRepository(private val context: Context) {
     }
 
     fun missingCalibrationKeys(config: AppConfig = load()): List<String> {
-        val p = config.calibration.points
-        val checks = listOf(
-            "搜索入口" to p.searchEntry,
-            "搜索输入" to p.searchInput,
-            "输入法剪贴板" to p.imeClipboard,
-            "剪贴板第一条" to p.imeClipboardItem1,
-            "搜索结果" to p.searchResult1,
-            "聊天加号" to p.chatMore,
-            "视频通话" to p.videoCall,
-            "确认视频" to p.videoCallConfirm
-        )
-        return checks.filter { it.second.x <= 0 || it.second.y <= 0 }.map { it.first }
+        val steps = getAutomationSteps(config)
+        if (steps.isEmpty()) return listOf("没有配置点击步骤")
+        return steps
+            .filter { it.enabled && needsCoordinate(it) }
+            .filter { it.point.x <= 0 || it.point.y <= 0 }
+            .map { it.name }
     }
 
     fun isCalibrationReady(config: AppConfig = load()): Boolean {
-        return missingCalibrationKeys(config).isEmpty()
+        val steps = getAutomationSteps(config)
+        return steps.isNotEmpty() && missingCalibrationKeys(config).isEmpty()
+    }
+
+    fun defaultAutomationSteps(calibration: CalibrationConfig): List<AutomationStepConfig> {
+        val p = calibration.points
+        val d = calibration.delays
+        fun tap(
+            id: String,
+            name: String,
+            point: PointConfig,
+            delayMs: Long = 700,
+            enabled: Boolean = true,
+            skipInDryRun: Boolean = false
+        ) = AutomationStepConfig(
+            id = id,
+            name = name,
+            action = AutomationActions.TAP,
+            point = point,
+            delayMs = delayMs,
+            enabled = enabled,
+            skipInDryRun = skipInDryRun
+        )
+
+        return listOf(
+            AutomationStepConfig(
+                id = "copy_search",
+                name = "复制微信搜索词",
+                action = AutomationActions.COPY_SEARCH,
+                delayMs = 300
+            ),
+            AutomationStepConfig(
+                id = "open_wechat",
+                name = "打开微信",
+                action = AutomationActions.OPEN_WECHAT,
+                delayMs = d.afterOpenWechatMs.coerceIn(800L, 1200L)
+            ),
+            tap("search_entry", "搜索入口", p.searchEntry, d.afterSearchEntryMs.coerceAtLeast(1200)),
+            tap("search_input", "搜索输入框", p.searchInput, 900),
+            tap(
+                "ime_menu",
+                "输入法总菜单",
+                p.imeMenu,
+                d.afterImeMenuMs.coerceAtLeast(500),
+                enabled = p.imeMenu.x > 0 && p.imeMenu.y > 0
+            ),
+            tap("ime_clipboard", "输入法剪贴板", p.imeClipboard, d.afterImeClipboardMs.coerceAtLeast(700)),
+            tap("ime_clipboard_item1", "剪贴板第一条", p.imeClipboardItem1, d.afterImeItemMs.coerceAtLeast(800)),
+            tap("search_result_1", "第一个搜索结果", p.searchResult1, d.afterResultMs.coerceAtLeast(1600)),
+            tap("chat_more", "聊天页加号", p.chatMore, d.afterChatMoreMs.coerceAtLeast(1100)),
+            tap("video_call", "视频通话", p.videoCall, d.afterVideoCallMs.coerceAtLeast(1100)),
+            tap(
+                "video_call_confirm",
+                "确认视频通话",
+                p.videoCallConfirm,
+                d.afterVideoConfirmMs.coerceAtLeast(900),
+                skipInDryRun = true
+            )
+        )
+    }
+
+    private fun needsCoordinate(step: AutomationStepConfig): Boolean {
+        return step.action == AutomationActions.TAP
     }
 
     private fun readPrefs(): AppConfig? {

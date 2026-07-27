@@ -55,7 +55,7 @@
                 android:id="@+id/btnCalibration"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="坐标校准" />
+                android:text="自定义点击流程 / 坐标校准" />
 
             <com.google.android.material.textview.MaterialTextView
                 android:id="@+id/tvCalibrationSummary"

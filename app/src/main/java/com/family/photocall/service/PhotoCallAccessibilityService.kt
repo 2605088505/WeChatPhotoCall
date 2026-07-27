@@ -26,6 +26,8 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import com.family.photocall.data.ConfigRepository
+import com.family.photocall.model.AutomationActions
+import com.family.photocall.model.AutomationStepConfig
 import com.family.photocall.model.AppConfig
 import com.family.photocall.model.ContactConfig
 import com.family.photocall.model.DelayConfig
@@ -140,8 +142,12 @@ class PhotoCallAccessibilityService : AccessibilityService() {
             return
         }
         val dryRun = forceDryRun ?: config.dryRun
+        Log.i(
+            TAG,
+            "startCall contact=${contact.id} forceDryRun=$forceDryRun " +
+                "configDryRun=${config.dryRun} effectiveDryRun=$dryRun"
+        )
         toast(if (dryRun) "开始演练：${contact.displayName}" else "正在呼叫：${contact.displayName}")
-        CallKeepAliveService.start(this, if (dryRun) "演练自动点击中…" else "自动视频通话中…")
         Thread {
             try {
                 runFlow(config, contact, dryRun)
@@ -156,70 +162,60 @@ class PhotoCallAccessibilityService : AccessibilityService() {
     }
 
     private fun runFlow(config: AppConfig, contact: ContactConfig, dryRun: Boolean) {
-        val points = config.calibration.points
-        val delays = config.calibration.delays
-
-        // ── 1. Open WeChat ──────────────────────────────────
-        step("open_wechat")
-        bringWeChatToFront(delays.afterOpenWechatMs.coerceAtLeast(2500))
-
-        // ── 2. Return to LauncherUI if on a sub-page ────────
-        // Press BACK once only if WeChat is NOT already on LauncherUI.
-        // Multiple BACKs would exit WeChat entirely.
-        if (!isOnLauncherUI()) {
-            Log.i(TAG, "Not on LauncherUI, pressing BACK once")
-            performGlobalAction(GLOBAL_ACTION_BACK)
-            sleep(800)
-        }
-        // Give LauncherUI a moment to settle
-        sleep(500)
-
-        // ── 3. Search entry ─────────────────────────────────
-        toast("即将点击搜索…")
-        sleep(600)
-        step("搜索入口 ${points.searchEntry.label()}")
-        tapWithRetry(points.searchEntry, "搜索入口", retries = 4)
-        sleep(delays.afterSearchEntryMs.coerceAtLeast(1200))
-
-        // ── 4. Search input ─────────────────────────────────
-        step("搜索输入框 ${points.searchInput.label()}")
-        tapWithRetry(points.searchInput, "搜索输入框", retries = 3)
-        sleep(900)
-
-        // ── 5. Paste via IME clipboard ──────────────────────
-        step("输入法剪贴板粘贴 ${contact.searchName}")
-        pasteByImeClipboard(contact.searchName, points, delays)
-        sleep(delays.afterInputMs.coerceAtLeast(1200))
-
-        // ── 6. Tap first search result ──────────────────────
-        step("搜索结果 ${points.searchResult1.label()}")
-        tapWithRetry(points.searchResult1, "搜索结果", retries = 4)
-        sleep(delays.afterResultMs.coerceAtLeast(1600))
-
-        // ── 7. Tap + button ─────────────────────────────────
-        step("加号 ${points.chatMore.label()}")
-        tapWithRetry(points.chatMore, "加号", retries = 4)
-        sleep(delays.afterChatMoreMs.coerceAtLeast(1100))
-
-        // ── 8. Video call entry in + panel ───────────────────
-        step("视频通话 ${points.videoCall.label()}")
-        tapWithRetry(points.videoCall, "视频通话", retries = 4)
-        sleep(delays.afterVideoCallMs.coerceAtLeast(1100))
-
-        if (dryRun) {
-            // 演示模式：走到"视频通话"按钮弹出确认层为止，不执行最后一下确认
-            toast("演示完成：已走到视频确认弹窗。最后一步（确认视频通话）未点击。")
-            return
+        val steps = repo.getAutomationSteps(config).filter { it.enabled }
+        if (steps.isEmpty()) {
+            throw IllegalStateException("没有启用任何点击步骤，请先配置点击流程")
         }
 
-        // ── 9. Confirm video call (final tap) ────────────────
-        if (points.videoCallConfirm.isUsable()) {
-            step("确认视频通话 ${points.videoCallConfirm.label()}")
-            tapWithRetry(points.videoCallConfirm, "确认视频通话", retries = 4)
-            sleep(delays.afterVideoConfirmMs.coerceAtLeast(900))
-            toast("已确认视频通话")
+        // The custom list may be reordered, but the search term is always prepared
+        // before opening WeChat or tapping the search UI.
+        step("开始搜索前复制搜索词 ${contact.searchName}")
+        setClipboard(contact.searchName)
+
+        var skippedDryRunStep = false
+        for (stepConfig in steps) {
+            val latestDryRun = repo.load().dryRun
+            if (stepConfig.skipInDryRun && (dryRun || latestDryRun)) {
+                skippedDryRunStep = true
+                Log.i(TAG, "dry run: skip step id=${stepConfig.id} name=${stepConfig.name}")
+                continue
+            }
+
+            step("${stepConfig.name} ${stepConfig.point.label()}")
+            when (stepConfig.action) {
+                AutomationActions.OPEN_WECHAT -> {
+                    bringWeChatToFront(stepConfig.delayMs)
+                    if (!isOnLauncherUI()) {
+                        Log.i(TAG, "Not on LauncherUI, pressing BACK once")
+                        performGlobalAction(GLOBAL_ACTION_BACK)
+                        sleep(300)
+                    }
+                    sleep(250)
+                }
+                AutomationActions.COPY_SEARCH -> setClipboard(contact.searchName)
+                AutomationActions.TAP -> {
+                    if (!stepConfig.point.isUsable()) {
+                        throw IllegalStateException("步骤“${stepConfig.name}”还没有校准坐标")
+                    }
+                    tapWithRetry(stepConfig.point, stepConfig.name, retries = 4)
+                    sleep(stepConfig.delayMs.coerceAtLeast(250))
+                }
+                else -> {
+                    if (!stepConfig.point.isUsable()) {
+                        throw IllegalStateException("步骤“${stepConfig.name}”还没有校准坐标")
+                    }
+                    tapWithRetry(stepConfig.point, stepConfig.name, retries = 4)
+                    sleep(stepConfig.delayMs.coerceAtLeast(250))
+                }
+            }
+        }
+
+        if (skippedDryRunStep) {
+            toast("演示完成：已跳过标记为“演示时跳过”的步骤。")
+        } else if (dryRun || repo.load().dryRun) {
+            toast("演示完成：流程已执行，没有标记需要跳过的步骤。")
         } else {
-            toast("已点击视频通话（未配置二次确认坐标）")
+            toast("自定义点击流程执行完成")
         }
     }
 
@@ -249,13 +245,11 @@ class PhotoCallAccessibilityService : AccessibilityService() {
 
     private fun bringWeChatToFront(minWaitMs: Long) {
         openWeChat()
-        sleep(800)
-        var ok = isWeChatForeground()
+        var ok = waitForWeChatForeground(1600)
         if (!ok) {
             Log.w(TAG, "wechat not detected after first launch, retry")
             openWeChat()
-            sleep(1200)
-            ok = isWeChatForeground()
+            ok = waitForWeChatForeground(1200)
         }
         if (!ok) {
             // 第三次：显式 LauncherUI
@@ -274,8 +268,7 @@ class PhotoCallAccessibilityService : AccessibilityService() {
             } catch (t: Throwable) {
                 Log.e(TAG, "explicit launch failed", t)
             }
-            sleep(1500)
-            ok = isWeChatForeground()
+            ok = waitForWeChatForeground(1800)
         }
 
         // 微信常把 a11y 树藏空，检测可能一直失败；若用户已看到微信打开，则降级继续
@@ -285,7 +278,18 @@ class PhotoCallAccessibilityService : AccessibilityService() {
         } else {
             Log.i(TAG, "wechat foreground confirmed")
         }
-        sleep(minWaitMs)
+        // The foreground wait above already absorbs launch variance. Keep only
+        // a short, configurable render settling delay before the first tap.
+        sleep(minWaitMs.coerceIn(300L, 1200L))
+    }
+
+    private fun waitForWeChatForeground(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(100L)
+        while (System.currentTimeMillis() < deadline) {
+            if (isWeChatForeground()) return true
+            sleep(100)
+        }
+        return isWeChatForeground()
     }
 
     private fun openWeChat() {
@@ -397,8 +401,7 @@ class PhotoCallAccessibilityService : AccessibilityService() {
             )
         }
 
-        // searchInput already tapped in step 4 of runFlow — do NOT tap again here.
-        // Just write clipboard and proceed directly to IME clipboard.
+        // 重新写一次，确保输入法剪贴板面板打开时第一条就是当前联系人。
         setClipboard(name)
         sleep(300)
 
@@ -432,11 +435,14 @@ class PhotoCallAccessibilityService : AccessibilityService() {
 
     private fun setClipboard(text: String) {
         val latch = CountDownLatch(1)
+        val copied = AtomicBoolean(false)
         mainHandler.post {
             try {
                 val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("photocall", text))
-                Log.i(TAG, "clipboard set, length=${text.length}")
+                val actual = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+                copied.set(actual == text)
+                Log.i(TAG, "clipboard set, verified=${copied.get()}, length=${text.length}")
             } catch (t: Throwable) {
                 Log.e(TAG, "clipboard set failed", t)
             } finally {
@@ -444,8 +450,9 @@ class PhotoCallAccessibilityService : AccessibilityService() {
             }
         }
         latch.await(1, TimeUnit.SECONDS)
-        // 再确认一次
-        sleep(100)
+        if (!copied.get()) {
+            throw IllegalStateException("无法把微信搜索词复制到剪贴板，请检查系统剪贴板权限")
+        }
     }
 
     private fun trySetTextEverywhere(text: String): Boolean {

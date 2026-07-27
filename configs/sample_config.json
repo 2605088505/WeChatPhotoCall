@@ -2,18 +2,18 @@
   "contacts": [
     {
       "id": "demo-1",
-      "displayName": "测试联系人",
-      "searchName": "测试",
+      "displayName": "示例联系人",
+      "searchName": "示例",
       "avatarPath": "",
       "enabled": true
     }
   ],
   "calibration": {
-    "deviceModel": "OPD2404",
-    "screenWidth": 2120,
-    "screenHeight": 3000,
+    "deviceModel": "sample-device",
+    "screenWidth": 1080,
+    "screenHeight": 1920,
     "densityDpi": 420,
-    "wechatVersionHint": "8.0.76",
+    "wechatVersionHint": "",
     "updatedAt": 0,
     "points": {
       "searchEntry": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},

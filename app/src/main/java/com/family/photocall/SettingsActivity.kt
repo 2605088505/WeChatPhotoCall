@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         btnCalibration.setOnClickListener {
-            startActivity(Intent(this, CalibrationActivity::class.java))
+            startActivity(Intent(this, AutomationStepsActivity::class.java))
         }
         btnA11y.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -119,9 +119,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun buildCalibrationSummary(): String {
         val cfg = repo.load()
         val c = cfg.calibration
-        val p = c.points
-        fun mark(v: com.family.photocall.model.PointConfig) =
-            if (v.x > 0 && v.y > 0) "✓(${v.x},${v.y})" else "未设置"
+        val steps = repo.getAutomationSteps(cfg)
         val missing = repo.missingCalibrationKeys(cfg)
         return buildString {
             append(
@@ -129,17 +127,23 @@ class SettingsActivity : AppCompatActivity() {
                 else "状态: 还缺 ${missing.joinToString("、")}\n"
             )
             append("分辨率: ${c.screenWidth}x${c.screenHeight}\n")
-            append("搜索入口: ${mark(p.searchEntry)}\n")
-            append("搜索输入: ${mark(p.searchInput)}\n")
-            append("输入法总菜单: ${mark(p.imeMenu)}\n")
-            append("输入法剪贴板: ${mark(p.imeClipboard)}\n")
-            append("剪贴板第一条: ${mark(p.imeClipboardItem1)}\n")
-            append("搜索结果: ${mark(p.searchResult1)}\n")
-            append("聊天加号: ${mark(p.chatMore)}\n")
-            append("视频通话: ${mark(p.videoCall)}\n")
-            append("确认视频: ${mark(p.videoCallConfirm)}\n")
-            append("微信Tab: ${mark(p.homeTabWechat)}\n")
-            append("返回: ${mark(p.back)}")
+            if (steps.isEmpty()) {
+                append("点击流程: 未配置")
+            } else {
+                append("点击流程:\n")
+                steps.forEachIndexed { index, step ->
+                    val point = if (step.point.x > 0 && step.point.y > 0) {
+                        "✓(${step.point.x},${step.point.y})"
+                    } else if (step.action == com.family.photocall.model.AutomationActions.TAP) {
+                        "未设置"
+                    } else {
+                        "无需坐标"
+                    }
+                    append("${index + 1}. ${step.name}: $point")
+                    if (!step.enabled) append(" [停用]")
+                    append("\n")
+                }
+            }
         }
     }
 

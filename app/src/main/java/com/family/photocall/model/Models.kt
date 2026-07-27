@@ -58,10 +58,28 @@ data class ContactConfig(
     val enabled: Boolean = true
 )
 
+data class AutomationStepConfig(
+    val id: String,
+    val name: String,
+    val action: String = AutomationActions.TAP,
+    val point: PointConfig = PointConfig(),
+    val delayMs: Long = 700,
+    val enabled: Boolean = true,
+    val skipInDryRun: Boolean = false
+)
+
+object AutomationActions {
+    const val TAP = "tap"
+    const val OPEN_WECHAT = "open_wechat"
+    const val COPY_SEARCH = "copy_search"
+}
+
 data class AppConfig(
     val contacts: List<ContactConfig> = emptyList(),
     val calibration: CalibrationConfig = CalibrationConfig(),
-    val dryRun: Boolean = true
+    val dryRun: Boolean = true,
+    // Nullable keeps old JSON files compatible; null means use the legacy default flow.
+    val automationSteps: List<AutomationStepConfig>? = null
 )
 
 enum class CalibrationStep(

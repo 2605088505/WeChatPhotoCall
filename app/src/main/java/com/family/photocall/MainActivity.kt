@@ -3,7 +3,6 @@ package com.family.photocall
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -25,7 +24,6 @@ import com.family.photocall.model.ContactConfig
 import com.family.photocall.service.PhotoCallAccessibilityService
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -44,7 +42,15 @@ class MainActivity : AppCompatActivity() {
         val btnSettings = findViewById<FloatingActionButton>(R.id.btnSettings)
         val btnRefresh = findViewById<MaterialButton>(R.id.btnRefreshStatus)
 
-        adapter = ContactAdapter { contact -> onContactClicked(contact) }
+        adapter = ContactAdapter(
+            onClick = { contact -> onContactClicked(contact) },
+            onLongClick = { contact ->
+                startActivity(
+                    Intent(this, ContactEditActivity::class.java)
+                        .putExtra(ContactEditActivity.EXTRA_ID, contact.id)
+                )
+            }
+        )
         recycler.layoutManager = GridLayoutManager(this, 2)
         recycler.adapter = adapter
 
@@ -112,7 +118,7 @@ class MainActivity : AppCompatActivity() {
                         "请到设置 → 坐标校准，把每一步都点选保存。"
                 )
                 .setPositiveButton("去校准") { _, _ ->
-                    startActivity(Intent(this, CalibrationActivity::class.java))
+                    startActivity(Intent(this, AutomationStepsActivity::class.java))
                 }
                 .setNegativeButton("取消", null)
                 .show()
@@ -122,8 +128,10 @@ class MainActivity : AppCompatActivity() {
         // 通过 :a11y 进程前台服务触发，避免主进程被冻结后手势失效
         com.family.photocall.service.CallKeepAliveService.startCall(this, contact.id)
         Toast.makeText(this, "已开始：${contact.displayName}", Toast.LENGTH_SHORT).show()
+        // 自动流程由独立服务接管；移除主界面任务，避免微信结束/服务停止时反复回到本 App。
         window.decorView.postDelayed({
-            moveTaskToBack(true)
+            finishAndRemoveTask()
+            overridePendingTransition(0, 0)
         }, 400)
     }
 
@@ -144,7 +152,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private class ContactAdapter(
-        private val onClick: (ContactConfig) -> Unit
+        private val onClick: (ContactConfig) -> Unit,
+        private val onLongClick: (ContactConfig) -> Unit
     ) : RecyclerView.Adapter<ContactAdapter.VH>() {
         private val items = mutableListOf<ContactConfig>()
 
@@ -163,26 +172,27 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount(): Int = items.size
 
         override fun onBindViewHolder(holder: VH, position: Int) {
-            holder.bind(items[position], onClick)
+            holder.bind(items[position], onClick, onLongClick)
         }
 
         class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
             private val avatar: ImageView = itemView.findViewById(R.id.imgAvatar)
             private val name: TextView = itemView.findViewById(R.id.tvName)
 
-            fun bind(item: ContactConfig, onClick: (ContactConfig) -> Unit) {
+            fun bind(
+                item: ContactConfig,
+                onClick: (ContactConfig) -> Unit,
+                onLongClick: (ContactConfig) -> Unit
+            ) {
                 name.text = item.displayName
-                if (item.avatarPath.isNotBlank()) {
-                    val f = File(item.avatarPath)
-                    if (f.exists()) {
-                        avatar.setImageBitmap(BitmapFactory.decodeFile(f.absolutePath))
-                    } else {
-                        avatar.setImageResource(R.drawable.ic_person)
-                    }
-                } else {
-                    avatar.setImageResource(R.drawable.ic_person)
-                }
+                avatar.setImageResource(R.drawable.ic_person)
+                val loaded = AvatarImageLoader.load(itemView.context, item.avatarPath, 360)
+                if (loaded != null) avatar.setImageBitmap(loaded)
                 itemView.setOnClickListener { onClick(item) }
+                itemView.setOnLongClickListener {
+                    onLongClick(item)
+                    true
+                }
             }
         }
     }

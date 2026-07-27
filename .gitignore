@@ -17,3 +17,14 @@ local.properties
 
 # Large binary test artifacts (开发调试用的截图、日志放 tools/ 不需要入库)
 tools/
+
+# Runtime data and diagnostics
+*.log
+logs/
+captures/
+
+# Local publishing notes and exported screenshots
+/ChatGPT/
+
+# APKs are distributed through GitHub Releases, not source commits
+*.apk

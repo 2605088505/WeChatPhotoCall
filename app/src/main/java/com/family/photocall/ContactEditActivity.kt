@@ -2,7 +2,6 @@ package com.family.photocall
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,21 +13,34 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 import java.io.File
-import java.io.FileOutputStream
-import java.util.UUID
 
 class ContactEditActivity : AppCompatActivity() {
 
     private lateinit var repo: ConfigRepository
     private var contactId: String? = null
     private var avatarPath: String = ""
+    private lateinit var avatarPreview: android.widget.ImageView
 
     private val pickImage = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val uri = result.data?.data ?: return@registerForActivityResult
-            avatarPath = copyAvatar(uri) ?: ""
+            cropImage.launch(
+                Intent(this, CropImageActivity::class.java)
+                    .putExtra(CropImageActivity.EXTRA_URI, uri.toString())
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            )
+        }
+    }
+
+    private val cropImage = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val path = result.data?.getStringExtra(CropImageActivity.EXTRA_PATH) ?: return@registerForActivityResult
+            avatarPath = path
+            showAvatar()
             Toast.makeText(this, if (avatarPath.isBlank()) "头像保存失败" else "头像已保存", Toast.LENGTH_SHORT).show()
         }
     }
@@ -45,6 +57,7 @@ class ContactEditActivity : AppCompatActivity() {
         val switchEnabled = findViewById<MaterialSwitch>(R.id.switchEnabled)
         val btnPickAvatar = findViewById<MaterialButton>(R.id.btnPickAvatar)
         val btnSave = findViewById<MaterialButton>(R.id.btnSave)
+        avatarPreview = findViewById(R.id.imgAvatarPreview)
 
         contactId = intent.getStringExtra(EXTRA_ID)
         if (contactId != null) {
@@ -58,6 +71,7 @@ class ContactEditActivity : AppCompatActivity() {
         } else {
             switchEnabled.isChecked = true
         }
+        showAvatar()
 
         btnPickAvatar.setOnClickListener {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -89,17 +103,9 @@ class ContactEditActivity : AppCompatActivity() {
         }
     }
 
-    private fun copyAvatar(uri: Uri): String? {
-        return try {
-            val dir = File(filesDir, "avatars").apply { mkdirs() }
-            val outFile = File(dir, "${contactId ?: UUID.randomUUID()}.jpg")
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(outFile).use { output -> input.copyTo(output) }
-            }
-            outFile.absolutePath
-        } catch (_: Exception) {
-            null
-        }
+    private fun showAvatar() {
+        avatarPreview.setImageResource(R.drawable.ic_person)
+        AvatarImageLoader.load(this, avatarPath, 480)?.let { avatarPreview.setImageBitmap(it) }
     }
 
     companion object {

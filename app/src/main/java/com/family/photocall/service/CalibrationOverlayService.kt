@@ -29,10 +29,9 @@ import androidx.core.app.NotificationCompat
 import com.family.photocall.R
 import com.family.photocall.SettingsActivity
 import com.family.photocall.data.ConfigRepository
-import com.family.photocall.data.pointOf
-import com.family.photocall.data.withStep
+import com.family.photocall.model.AutomationActions
+import com.family.photocall.model.AutomationStepConfig
 import com.family.photocall.model.CalibrationConfig
-import com.family.photocall.model.CalibrationStep
 import com.family.photocall.model.PointConfig
 import kotlin.math.abs
 
@@ -47,7 +46,7 @@ class CalibrationOverlayService : Service() {
     private var bubbleParams: WindowManager.LayoutParams? = null
     private var captureView: View? = null
     private var cancelCaptureButton: View? = null
-    private val steps: List<CalibrationStep> = CalibrationStep.entries
+    private val steps = mutableListOf<AutomationStepConfig>()
     private var index: Int = 0
     private var working: CalibrationConfig = CalibrationConfig()
     private var minimized: Boolean = false
@@ -59,7 +58,14 @@ class CalibrationOverlayService : Service() {
         super.onCreate()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         repo = ConfigRepository(this)
-        working = repo.load().calibration
+        val config = repo.load()
+        working = config.calibration
+        steps.addAll(repo.getAutomationSteps(config))
+        if (steps.isEmpty()) {
+            Toast.makeText(this, "还没有配置点击步骤，请先添加步骤", Toast.LENGTH_LONG).show()
+            stopSelf()
+            return
+        }
         createChannel()
         startAsForeground()
         showPanel()
@@ -316,13 +322,20 @@ class CalibrationOverlayService : Service() {
 
         val step = steps[index]
         progress.text = "步骤 ${index + 1}/${steps.size}  ·  可拖动，勿挡目标按钮"
-        title.text = step.title
-        val existing = working.points.pointOf(step.key)
+        title.text = step.name
+        val existing = step.point
         instruction.text = buildString {
-            append(step.instruction)
+            append(
+                when (step.action) {
+                    AutomationActions.OPEN_WECHAT -> "执行时打开微信并等待页面稳定。此步骤不需要校准坐标。"
+                    AutomationActions.COPY_SEARCH -> "执行时把当前联系人搜索词写入剪贴板。此步骤不需要校准坐标。"
+                    else -> "请打开对应页面，点击“开始点选”，再点击“${step.name}”实际所在的位置。"
+                }
+            )
             if (existing.x > 0 && existing.y > 0) {
                 append("\n当前已记录: (${existing.x}, ${existing.y})")
             }
+            if (step.skipInDryRun) append("\n演示模式：跳过此步骤")
         }
 
         btnMinimize.setOnClickListener {
@@ -346,12 +359,17 @@ class CalibrationOverlayService : Service() {
             Toast.makeText(this, "已收起。点蓝色小球可重新展开", Toast.LENGTH_SHORT).show()
         }
 
-        btnCapture.setOnClickListener { enterCaptureMode() }
+        val needsCoordinate = step.needsCoordinate()
+        btnCapture.isEnabled = needsCoordinate
+        btnCapture.text = if (needsCoordinate) "开始点选" else "无需校准坐标"
+        btnCapture.setOnClickListener {
+            if (needsCoordinate) enterCaptureMode()
+        }
 
         // 验证：画红圈 + 执行真实点击，让你确认位置和效果是否正确
         val btnVerify = panel.findViewById<Button>(R.id.btnVerify)
         btnVerify.setOnClickListener {
-            val pt = working.points.pointOf(step.key)
+            val pt = step.point
             if (pt.x <= 0 || pt.y <= 0) {
                 Toast.makeText(this, "还没标过这个点，请先点选", Toast.LENGTH_SHORT).show()
             } else {
@@ -387,17 +405,9 @@ class CalibrationOverlayService : Service() {
                 Toast.makeText(this, "未安装微信", Toast.LENGTH_SHORT).show()
             }
         }
-        val optional = step == CalibrationStep.HOME_TAB_WECHAT ||
-            step == CalibrationStep.BACK ||
-            step == CalibrationStep.IME_MENU
         val hasCoord = existing.x > 0 && existing.y > 0
-        // 已有坐标的步骤：显示"下一步"；没坐标的可选步骤：显示"跳过"；没坐标的必须步骤：显示"跳过(保留)"
-        btnSkip.text = when {
-            hasCoord -> "下一步"
-            optional -> "跳过"
-            else -> "下一步(不改)"
-        }
-        btnSkip.text = if (optional) "跳过" else "下一步"
+        btnVerify.isEnabled = needsCoordinate && hasCoord
+        btnSkip.text = if (needsCoordinate && !hasCoord) "下一步(暂不校准)" else "下一步"
     }
 
     private fun enterCaptureMode() {
@@ -518,25 +528,23 @@ class CalibrationOverlayService : Service() {
                 yPercent = if (metrics.heightPixels > 0) y.toFloat() / metrics.heightPixels else 0f
             )
             val step = steps.getOrNull(index) ?: return
+            steps[index] = steps[index].copy(point = point)
             working = working.copy(
                 deviceModel = Build.MODEL.orEmpty(),
                 screenWidth = metrics.widthPixels,
                 screenHeight = metrics.heightPixels,
                 densityDpi = metrics.densityDpi,
-                updatedAt = System.currentTimeMillis(),
-                points = working.points.withStep(step.key, point)
+                updatedAt = System.currentTimeMillis()
             )
             persist()
-            Toast.makeText(this, "${step.title} 已记录: ($x, $y)", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "${step.name} 已记录: ($x, $y)", Toast.LENGTH_SHORT).show()
 
             // 先恢复面板，再进入下一步，避免“点完就消失”
             if (index < steps.lastIndex) {
                 index++
             }
             restorePanelSafely()
-            if (index >= steps.lastIndex &&
-                working.points.pointOf(steps[index].key).x > 0
-            ) {
+            if (index >= steps.lastIndex && steps[index].point.x > 0) {
                 // 最后一步也记完了，不自动关服务，让用户自己点“保存退出”
                 panelView?.let { bindPanel(it) }
                 Toast.makeText(this, "全部点位已记录，可点“保存退出”", Toast.LENGTH_LONG).show()
@@ -657,6 +665,7 @@ class CalibrationOverlayService : Service() {
     private fun persist() {
         try {
             repo.updateCalibration(working)
+            repo.updateAutomationSteps(steps.toList())
         } catch (t: Throwable) {
             Log.e(TAG, "persist failed", t)
         }
@@ -720,4 +729,9 @@ class CalibrationOverlayService : Service() {
             )
         }
     }
+
+    private fun AutomationStepConfig.needsCoordinate(): Boolean {
+        return action != AutomationActions.OPEN_WECHAT && action != AutomationActions.COPY_SEARCH
+    }
+
 }

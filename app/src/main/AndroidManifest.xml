@@ -45,6 +45,18 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".AutomationStepsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.WeChatPhotoCall" />
+
+        <activity
+            android:name=".CropImageActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.WeChatPhotoCall" />
+
+        <activity
             android:name=".CalibrationActivity"
             android:exported="false"
             android:label="@string/calibration"
