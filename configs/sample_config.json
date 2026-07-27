@@ -1,0 +1,40 @@
+{
+  "contacts": [
+    {
+      "id": "demo-1",
+      "displayName": "测试联系人",
+      "searchName": "测试",
+      "avatarPath": "",
+      "enabled": true
+    }
+  ],
+  "calibration": {
+    "deviceModel": "OPD2404",
+    "screenWidth": 2120,
+    "screenHeight": 3000,
+    "densityDpi": 420,
+    "wechatVersionHint": "8.0.76",
+    "updatedAt": 0,
+    "points": {
+      "searchEntry": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "searchInput": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "inputAction": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "searchResult1": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "chatMore": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "videoCall": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "videoCallConfirm": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "homeTabWechat": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0},
+      "back": {"x": 0, "y": 0, "xPercent": 0, "yPercent": 0}
+    },
+    "delays": {
+      "afterOpenWechatMs": 1800,
+      "afterSearchEntryMs": 900,
+      "afterInputMs": 1200,
+      "afterResultMs": 1400,
+      "afterChatMoreMs": 900,
+      "afterVideoCallMs": 900,
+      "afterVideoConfirmMs": 800
+    }
+  },
+  "dryRun": true
+}

@@ -1,0 +1,2 @@
+# 复制为 local.properties，并把 sdk.dir 改成你本机的 Android SDK 路径
+sdk.dir=F:/WeChatPhotoCall/tools/android-sdk
