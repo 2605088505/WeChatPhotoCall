@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">亲情照片通话</string>
+    <string name="settings">设置</string>
+    <string name="calibration">坐标校准</string>
+    <string name="edit_contact">编辑联系人</string>
+    <string name="avatar">头像</string>
+    <string name="a11y_service_label">亲情照片通话</string>
+    <string name="a11y_service_description">用于按你校准的坐标，自动点击微信搜索和视频通话按钮。不会读取微信聊天内容。</string>
+</resources>
