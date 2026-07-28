@@ -85,20 +85,22 @@ class ConfigRepository(private val context: Context) {
     }
 
     fun getAutomationSteps(config: AppConfig = load()): List<AutomationStepConfig> {
-        return config.automationSteps ?: defaultAutomationSteps(config.calibration)
+        val steps = config.automationSteps ?: defaultAutomationSteps(config.calibration)
+        return removeLegacyBackStep(steps)
     }
 
     fun ensureAutomationSteps(): List<AutomationStepConfig> {
         val current = load()
-        val steps = current.automationSteps ?: defaultAutomationSteps(current.calibration)
-        if (current.automationSteps == null) {
+        val rawSteps = current.automationSteps ?: defaultAutomationSteps(current.calibration)
+        val steps = removeLegacyBackStep(rawSteps)
+        if (current.automationSteps == null || steps != rawSteps) {
             save(current.copy(automationSteps = steps))
         }
         return steps
     }
 
     fun updateAutomationSteps(steps: List<AutomationStepConfig>) {
-        save(load().copy(automationSteps = steps))
+        save(load().copy(automationSteps = normalizeAutomationSteps(steps)))
     }
 
     fun exportJson(): String = gson.toJson(load())
@@ -199,6 +201,25 @@ class ConfigRepository(private val context: Context) {
 
     private fun needsCoordinate(step: AutomationStepConfig): Boolean {
         return step.action == AutomationActions.TAP
+    }
+
+    /** The old fixed back step is no longer part of the customizable flow. */
+    private fun removeLegacyBackStep(steps: List<AutomationStepConfig>): List<AutomationStepConfig> {
+        return normalizeAutomationSteps(steps).filterNot {
+            it.id.equals("back", ignoreCase = true) || it.name == "返回位置（可选）"
+        }
+    }
+
+    /** Never allow demo mode to reach the actual call confirmation tap. */
+    private fun normalizeAutomationSteps(steps: List<AutomationStepConfig>): List<AutomationStepConfig> {
+        return steps.map { step ->
+            if (isCallConfirmationStep(step)) step.copy(skipInDryRun = true) else step
+        }
+    }
+
+    private fun isCallConfirmationStep(step: AutomationStepConfig): Boolean {
+        return step.id.equals("video_call_confirm", ignoreCase = true) ||
+            step.name.trim() in setOf("确认视频通话", "确认通话", "视频通话确认")
     }
 
     private fun readPrefs(): AppConfig? {

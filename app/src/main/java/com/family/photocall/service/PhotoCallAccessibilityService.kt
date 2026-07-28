@@ -45,6 +45,8 @@ class PhotoCallAccessibilityService : AccessibilityService() {
     private lateinit var repo: ConfigRepository
     private var receiverRegistered = false
     private var wm: WindowManager? = null
+    @Volatile
+    private var lastEventPackage: String? = null
 
     private val commandReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -104,7 +106,13 @@ class PhotoCallAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val packageName = event?.packageName?.toString() ?: return
+        if (packageName != lastEventPackage) {
+            lastEventPackage = packageName
+            Log.d(TAG, "accessibility event package=$packageName")
+        }
+    }
 
     override fun onInterrupt() {
         // 不要把 running 直接清掉导致半截流程状态错乱；仅记录
@@ -175,9 +183,15 @@ class PhotoCallAccessibilityService : AccessibilityService() {
         var skippedDryRunStep = false
         for (stepConfig in steps) {
             val latestDryRun = repo.load().dryRun
-            if (stepConfig.skipInDryRun && (dryRun || latestDryRun)) {
+            val isConfirmationStep = stepConfig.id.equals("video_call_confirm", ignoreCase = true) ||
+                stepConfig.name.trim() in setOf("确认视频通话", "确认通话", "视频通话确认")
+            if ((stepConfig.skipInDryRun || isConfirmationStep) && (dryRun || latestDryRun)) {
                 skippedDryRunStep = true
-                Log.i(TAG, "dry run: skip step id=${stepConfig.id} name=${stepConfig.name}")
+                Log.i(
+                    TAG,
+                    "dry run: skip step id=${stepConfig.id} name=${stepConfig.name} " +
+                        "confirmation=$isConfirmationStep configured=${stepConfig.skipInDryRun}"
+                )
                 continue
             }
 
@@ -185,11 +199,6 @@ class PhotoCallAccessibilityService : AccessibilityService() {
             when (stepConfig.action) {
                 AutomationActions.OPEN_WECHAT -> {
                     bringWeChatToFront(stepConfig.delayMs)
-                    if (!isOnLauncherUI()) {
-                        Log.i(TAG, "Not on LauncherUI, pressing BACK once")
-                        performGlobalAction(GLOBAL_ACTION_BACK)
-                        sleep(300)
-                    }
                     sleep(250)
                 }
                 AutomationActions.COPY_SEARCH -> setClipboard(contact.searchName)
@@ -219,57 +228,12 @@ class PhotoCallAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** 判断微信当前是否在会话列表主界面（LauncherUI） */
-    private fun isOnLauncherUI(): Boolean {
-        try {
-            val wins = windows
-            if (wins != null) {
-                for (w in wins) {
-                    try {
-                        val pkg = w.root?.packageName?.toString()
-                        val title = w.title?.toString() ?: ""
-                        if (pkg == WECHAT_PKG && title.contains("LauncherUI", true)) return true
-                    } catch (_: Exception) {}
-                }
-            }
-        } catch (_: Exception) {}
-        // fallback: check root window
-        val root = rootInActiveWindow
-        return try {
-            val pkg = root?.packageName?.toString()
-            val cls = root?.className?.toString() ?: ""
-            pkg == WECHAT_PKG && (cls.contains("Launcher", true) || cls.isEmpty())
-        } catch (_: Exception) { false }
-        finally { try { root?.recycle() } catch (_: Exception) {} }
-    }
-
     private fun bringWeChatToFront(minWaitMs: Long) {
         openWeChat()
-        var ok = waitForWeChatForeground(1600)
-        if (!ok) {
-            Log.w(TAG, "wechat not detected after first launch, retry")
-            openWeChat()
-            ok = waitForWeChatForeground(1200)
-        }
-        if (!ok) {
-            // 第三次：显式 LauncherUI
-            try {
-                val intent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_LAUNCHER)
-                    setClassName(WECHAT_PKG, "$WECHAT_PKG.ui.LauncherUI")
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                    )
-                }
-                startActivity(intent)
-            } catch (t: Throwable) {
-                Log.e(TAG, "explicit launch failed", t)
-            }
-            ok = waitForWeChatForeground(1800)
-        }
+        // ColorOS may hide the accessibility window tree even though WeChat is
+        // already visible. Do one launch only; repeated launches cause visible
+        // startup animations and can reorder the task back to the launcher.
+        val ok = waitForWeChatForeground(1600)
 
         // 微信常把 a11y 树藏空，检测可能一直失败；若用户已看到微信打开，则降级继续
         if (!ok) {
@@ -326,6 +290,10 @@ class PhotoCallAccessibilityService : AccessibilityService() {
      * 改用 windows 列表 + root 双重判断。
      */
     private fun isWeChatForeground(): Boolean {
+        // On some ColorOS/Android 11 builds the active window tree is empty,
+        // while accessibility events still report the foreground package.
+        if (lastEventPackage == WECHAT_PKG) return true
+
         // 1) windows API（比 root 包名更可靠）
         try {
             val wins = windows
